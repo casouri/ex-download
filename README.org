@@ -2,9 +2,11 @@
 
 This downloader automatically downloads gallaries from your favorite page through archive download. *This downloader costs GP!*
 
+
 * Use
-- get your cookie and save to =cookie.json= under root dir.
-- create a directory =gallary= under root dir.
+- make sure your Python has requests and requests_html
+- get your cookie and save to =cookie.json= under root dir
+- create a directory =gallary= under root dir
 - run =python exh.py=
 
 * Customize
