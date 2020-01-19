@@ -30,10 +30,14 @@ def get_gallary_link_and_name(response, gallary_name_list):
     """Get each gallary in RESPONSE and return them as a list.
 Only include ones that its name is not in GALLARY_NAME_LIST."""
     node_list = response.html.xpath(GALLARY_LINK_NODE_XPATH)
+    if node_list == []:
+        raise Exception('Cannot find gallaries html nodes from page at all')
     gallary_link_list = []
     new_gallary_name_list = []
     for node in node_list:
         link = node.attrs['href']
+        if link == None:
+            raise Exception('Cannot find gallary link from gallary html node')
         name = escape_windows_filename(node.text)
         if name not in gallary_name_list:
             gallary_link_list.append(link)
@@ -61,7 +65,7 @@ def get_download_link(session, resp, cookie):
     next_page_url = list(resp.html.links)[0]
     resp = get_page_with_retry(session, next_page_url, cookie, 5)
     if resp is None:
-        return (None, None)
+        raise Exception
     # finally we have the download path
     name_node_list = resp.html.xpath('//strong')
     # filename = escape_windows_filename(name_node_list[0].text)
@@ -85,7 +89,7 @@ def get_page_with_retry(session, link, cookie, maxtry):
     count = 0
     while True:
         if count == maxtry:
-            return
+            raise Exception(f'Tried {maxtry} times and still cannot get page')
         try:
             return session.get(link, cookies=cookie)
         except requests.exceptions.ConnectionError:
@@ -146,20 +150,25 @@ if __name__ == '__main__':
     # goes into each page and get download link
     total_gallary_count = len(gallary_link_list)
     current_count = 0
+    failed_list = []
     # why use name from gallary_name_list rather than from archive
     # download? those names doesn’t always match! If I use gallary
     # names to test if I’ve downloaded the gallary and use archive names
     # to download, those gallaries appear as not-yet-downlaoded
     # gallaries every time.
     for gallary_link, gallary_name in zip(gallary_link_list, new_gallary_name_list):
-        current_count += 1
-        print(f'Downloading gallary {current_count}/{total_gallary_count}')
-        resp = get_page_with_retry(session, gallary_link, cookie, 5)
-        if resp is None:
-            print('Failed to fetch gallary page')
-            failed_list.append(gallary_link)
-            continue
-        download_link = get_download_link(session, resp, cookie)
-        if download_link is not None:
-            print(f'Saving {gallary_name}')
+        try:
+            current_count += 1
+            print(f'Downloading gallary {current_count}/{total_gallary_count}')
+            print(f'{gallary_name}')
+            resp = get_page_with_retry(session, gallary_link, cookie, 5)
+            download_link = get_download_link(session, resp, cookie)
             save_gallary_zip(gallary_name, download_link)
+        except:
+            failed_list.append((gallary_name, gallary_link))
+    # print failed ones
+    if failed_list != []:
+        print(f'Failed to download {len(failed_list)} gallar(ies):')
+        for name, link in failed_list:
+            print(name)
+            print(f'  {link}')
