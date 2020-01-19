@@ -1,0 +1,21 @@
+* Ex Archive Downloader
+
+This downloader automatically downloads gallaries from your favorite page through archive download. *This downloader costs GP!*
+
+* Use
+- get your cookie and save to =cookie.json= under root dir.
+- create a directory =gallary= under root dir.
+- run =python exh.py=
+
+* Customize
+#+BEGIN_SRC python
+# to where gallaries are saved
+GALLARY_ROOT_DIR = './gallary'
+# whether to use aria2 downloader
+USE_ARIA2 = True
+# name of the cookie file
+COOKIE_FILE = 'cookie.json'
+#+END_SRC
+
+* Note
+If you think the script is stuck, be aware that some gallaries are very large (~1G) and takes a much longer time to download.
