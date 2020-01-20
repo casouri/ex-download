@@ -11,6 +11,8 @@ GALLARY_ROOT_DIR = './gallary'
 USE_ARIA2 = True
 # name of the cookie file
 COOKIE_FILE = 'cookie.json'
+# seconds wait for between requests (so we are not blocked)
+WAIT_INTERVAL = 1
 
 EX_URL = 'https://exhentai.org'
 FAV_URL = 'https://exhentai.org/favorites.php'
@@ -59,16 +61,13 @@ def get_download_link(session, resp, cookie):
     """Get download link from gallary page response."""
     onclick_code = resp.html.xpath(DOWNLOAD_ARCHIVE_ONCLICK_XPATH)[0]
     popup_url = re.search("'(https://.+)'", onclick_code).groups()[0]
-    resp = session.get(popup_url, cookies=cookie)
+    resp = get_page_with_retry(session, popup_url, cookie, 3)
     # now resp is at the page saying it takes a few minuets to load
     # we grab the url to the final page
     next_page_url = list(resp.html.links)[0]
-    resp = get_page_with_retry(session, next_page_url, cookie, 5)
-    if resp is None:
-        raise Exception
+    wait(3)
+    resp = get_page_with_retry(session, next_page_url, cookie, 5, 3)
     # finally we have the download path
-    name_node_list = resp.html.xpath('//strong')
-    # filename = escape_windows_filename(name_node_list[0].text)
     download_link = list(resp.html.absolute_links)[0]
     return download_link
 
@@ -84,18 +83,16 @@ def save_gallary_zip(name, download_link):
             fle.write(requests.get(download_link).content)
 
 
-def get_page_with_retry(session, link, cookie, maxtry):
+def get_page_with_retry(session, link, cookie, maxtry, wait_interval=None):
     """Try to fetch page and return response, if failed, retry after 1 second."""
     count = 0
-    while True:
-        if count == maxtry:
-            raise Exception(f'Tried {maxtry} times and still cannot get page')
+    while count < maxtry:
         try:
             return session.get(link, cookies=cookie)
         except requests.exceptions.ConnectionError:
-            time.sleep(1)
+            wait(wait_interval)
             count += 1
-            continue
+    raise Exception(f'Tried {maxtry} times and still cannot get page')
 
 
 def at_non_exist_page(resp):
@@ -106,6 +103,12 @@ def at_non_exist_page(resp):
     text = resp.html.text
     return re.search(NOTICE, text) is not None
 
+
+def wait(length=WAIT_INTERVAL):
+    """Wait for LENGTH or WAIT_INTERVAL seconds."""
+    if length == None:
+        length = WAIT_INTERVAL
+    time.sleep(length)
 
 # basically:
 # - get favorite page
@@ -124,7 +127,7 @@ if __name__ == '__main__':
 
     # get first page
     session = HTMLSession()
-    resp = session.get(FAV_URL, cookies=cookie)
+    resp = get_page_with_retry(session, FAV_URL, cookie, 3)
 
     
     # get all favorite pages and grab gallary links from them
@@ -135,12 +138,13 @@ if __name__ == '__main__':
     print(f'Found {len(gallary_name_list)} existing gallaries')
     print('Scanning gallaries')
     while not at_non_exist_page(resp):
+        wait()
         new_link_list, new_name_list = get_gallary_link_and_name(resp, gallary_name_list)
         gallary_link_list += new_link_list
         new_gallary_name_list += new_name_list
         page_idx += 1
         next_page_url = f'{FAV_URL}?page={page_idx}'
-        resp = session.get(next_page_url, cookies=cookie)
+        resp = get_page_with_retry(session, next_page_url, cookie, 3)
     print(f'Found {len(gallary_link_list)} new gallaries:')
     for name in new_gallary_name_list:
         print(f'  {name}')
@@ -157,12 +161,15 @@ if __name__ == '__main__':
     # to download, those gallaries appear as not-yet-downlaoded
     # gallaries every time.
     for gallary_link, gallary_name in zip(gallary_link_list, new_gallary_name_list):
+        wait()
         try:
             current_count += 1
             print(f'Downloading gallary {current_count}/{total_gallary_count}')
             print(f'{gallary_name}')
             resp = get_page_with_retry(session, gallary_link, cookie, 5)
+            wait()
             download_link = get_download_link(session, resp, cookie)
+            wait()
             save_gallary_zip(gallary_name, download_link)
         except:
             failed_list.append((gallary_name, gallary_link))
