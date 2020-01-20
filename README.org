@@ -1,6 +1,8 @@
 * Ex Archive Downloader
 
-This downloader automatically downloads gallaries from your favorite page through archive download. *This downloader costs GP!*
+This downloader automatically downloads gallaries from your favorite page through archive download.
+
+*This downloader costs GP!*
 
 
 * Use
@@ -17,6 +19,8 @@ GALLARY_ROOT_DIR = './gallary'
 USE_ARIA2 = True
 # name of the cookie file
 COOKIE_FILE = 'cookie.json'
+# seconds wait for between requests (so we are not blocked)
+WAIT_INTERVAL = 1
 #+END_SRC
 
 * Note
