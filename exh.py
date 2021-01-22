@@ -123,6 +123,11 @@ misc, taglist, uploader, label, comment."""
 ### Main program
 
 if __name__ == '__main__':
+    if not os.path.exists(GALLERY_DIR):
+        os.makedirs(GALLERY_DIR)
+    if not os.path.exists(INFO_DIR):
+        os.makedirs(INFO_DIR)
+
     cookie = None
     with open('cookie.json', 'r') as fle:
         cookie = json.load(fle)
