@@ -8,11 +8,7 @@ This downloader automatically downloads galleries from your favorite page throug
 - Make sure your Python has requests and requests_html.
 - Get your cookie and save to =cookie.json= under root directory.
 - Run =python exh.py=.
-
-* Customize
-#+BEGIN_SRC python
-GALLARY_DIR = './gallary'
-#+END_SRC
+- Galleries are put under =gallery/=, meta data are put under =info/=.
 
 * Note
 If you think the script is stuck, be aware that some gallaries are very large (~1G) and takes a long time to download.
