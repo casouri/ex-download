@@ -11,4 +11,4 @@ This downloader automatically downloads galleries from your favorite page throug
 - Galleries are put under =gallery/=, meta data are put under =info/=.
 
 * Note
-If you think the script is stuck, be aware that some gallaries are very large (~1G) and takes a long time to download.
+If you think the script is stuck, be aware that some gallaries are very large (~1G) and take a long time to download.
