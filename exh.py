@@ -4,178 +4,183 @@ import json
 import os
 import re
 import time
+import unicodedata
 
-# to where gallaries are saved
-GALLARY_ROOT_DIR = './gallary'
-# whether to use aria2 downloader
-USE_ARIA2 = True
-# name of the cookie file
-COOKIE_FILE = 'cookie.json'
-# seconds wait for between requests (so we are not blocked)
-WAIT_INTERVAL = 1
+GALLERY_DIR = './gallery'
+INFO_DIR = './info'
 
 EX_URL = 'https://exhentai.org'
 FAV_URL = 'https://exhentai.org/favorites.php'
-# GALLARY_LINK_XPATH = '//div[@class = "gl1t"]/a/@href'
-GALLARY_LINK_NODE_XPATH = '//div[@class = "gl1t"]/div/div/a'
+# GALLERY_LINK_XPATH = '//div[@class = "gl1t"]/a/@href'
+GALLERY_LINK_NODE_XPATH = '//div[@class = "gl1t"]/div/div/a'
 DOWNLOAD_ARCHIVE_ONCLICK_XPATH = '//a[text() = "Archive Download"]/@onclick'
 
+# Favorite label.
+LABEL_XPATH = '//*[@id="favoritelink"]'
+UPLOADER_XPATH = '//*[@id="gdn"]'
+COMMENT_XPATH = '//*[@class="c1"]'
+MISC_XPATH = '//*[@id="gdd"]'
+TAGLIST_XPATH = '//*[@id="taglist"]'
 
-# you need to escape filenames if you use NTFS
-def escape_windows_filename(name):
-    """Return a windows-compatible NAME."""
-    for char in '<>:"\\/|?*':
-        name = name.replace(char, '-')
-    return name
+### Helpers
 
-def get_gallary_link_and_name(response, gallary_name_list):
-    """Get each gallary in RESPONSE and return them as a list.
-Only include ones that its name is not in GALLARY_NAME_LIST."""
-    node_list = response.html.xpath(GALLARY_LINK_NODE_XPATH)
-    if node_list == []:
-        raise Exception('Cannot find gallaries html nodes from page at all')
-    gallary_link_list = []
-    new_gallary_name_list = []
-    for node in node_list:
-        link = node.attrs['href']
-        if link == None:
-            raise Exception('Cannot find gallary link from gallary html node')
-        name = escape_windows_filename(node.text)
-        if name not in gallary_name_list:
-            gallary_link_list.append(link)
-            new_gallary_name_list.append(name)
-    return gallary_link_list, new_gallary_name_list
-
-
-def get_gallary_name_list(gallary_root_dir):
-    """Get a list of gallary names under GALLARY_ROOT_DIR."""
-    name_list = []
-    for fle in os.listdir(gallary_root_dir):
-        if os.path.isfile(os.path.join(gallary_root_dir, fle)):
-            name = os.path.splitext(os.path.basename(fle))[0]
-            name_list.append(escape_windows_filename(name))
-    return name_list
-
-
-def get_download_link(session, resp, cookie):
-    """Get download link from gallary page response."""
-    onclick_code = resp.html.xpath(DOWNLOAD_ARCHIVE_ONCLICK_XPATH)[0]
-    popup_url = re.search("'(https://.+)'", onclick_code).groups()[0]
-    resp = get_page_with_retry(session, popup_url, cookie, 3)
-    # now resp is at the page saying it takes a few minuets to load
-    # we grab the url to the final page
-    next_page_url = list(resp.html.links)[0]
-    wait(3)
-    resp = get_page_with_retry(session, next_page_url, cookie, 5, 3)
-    # finally we have the download path
-    download_link = list(resp.html.absolute_links)[0]
-    return download_link
-
-
-def save_gallary_zip(name, download_link):
-    path = os.path.join(GALLARY_ROOT_DIR, f'{name}.zip')
-    if USE_ARIA2: # max 5 connections, continue, quite
-        valid_link = download_link.replace('"', '\\"')
-        valid_path = path.replace('"', '\\"')
-        os.system(f'aria2c -x3 -q -c "{valid_link}" -o "{valid_path}"')
-    else:
-        with open(path, 'bw') as fle:
-            fle.write(requests.get(download_link).content)
-
-
-def get_page_with_retry(session, link, cookie, maxtry, wait_interval=None):
-    """Try to fetch page and return response, if failed, retry after 1 second."""
+def get_page_with_retry(session, link, cookie, maxtry):
+    """Try to fetch page and return response.
+If failed, retry after 1 second."""
     count = 0
-    while count < maxtry:
+    while True:
+        if count == maxtry:
+            return
         try:
             return session.get(link, cookies=cookie)
         except requests.exceptions.ConnectionError:
-            wait(wait_interval)
+            time.sleep(1)
             count += 1
-    raise Exception(f'Tried {maxtry} times and still cannot get page')
-
+            continue
 
 def at_non_exist_page(resp):
     """Return True if we are at the last page of favorites"""
-    # if there is this td, we are at the last page, specifically
-    # this is the greyed-out next-page button
+    # If there is this td, we are at the last page, specifically
+    # this is the greyed-out next-page button.
     NOTICE = 'No unfiltered results in this page range. You either requested an invalid page or used too aggressive filters.'
     text = resp.html.text
     return re.search(NOTICE, text) is not None
 
+def make_filename(name):
+    """Make NAME a valid UNIX filename."""
+    return name.replace('/', ' ')
 
-def wait(length=WAIT_INTERVAL):
-    """Wait for LENGTH or WAIT_INTERVAL seconds."""
-    if length == None:
-        length = WAIT_INTERVAL
-    time.sleep(length)
+### Getting things
 
-# basically:
-# - get favorite page
-# - go through each page and grab links to each gallary
-#   (that’s not downloaded yet)
-# - go to each gallary, grab the archive download button’s link
-# - get the download page, this page is the one asking you to wait for a few minutes
-# - get the url to the result page from html
-# - finally get the download url from this result page
-#   (archive prepared, click link below to download)
-if __name__ == '__main__':
-    print("Start")
-    cookie = None
-    with open(COOKIE_FILE) as f1:
-        cookie = json.load(f1)
+def gallery_link_in_page(response):
+    """Get each gallery in RESPONSE and return them as a list.
+Return a list of (LINK, NAME).
+The page should be the page showing thumbnails of each gallery."""
+    node_list = response.html.xpath(GALLERY_LINK_NODE_XPATH)
+    lst = []
+    for node in node_list:
+        link = node.attrs['href']
+        name = unicodedata.normalize('NFC', node.text)
+        lst.append((link, name))
+    return lst
 
-    # get first page
-    session = HTMLSession()
-    resp = get_page_with_retry(session, FAV_URL, cookie, 3)
-
-    
-    # get all favorite pages and grab gallary links from them
-    gallary_name_list = get_gallary_name_list(GALLARY_ROOT_DIR)
-    gallary_link_list = []
-    new_gallary_name_list = []
+def all_gallery_links(session, cookie):
+    """Return a list of all gallery links."""
+    lst = []
     page_idx = 0
-    print(f'Found {len(gallary_name_list)} existing gallaries')
-    print('Scanning gallaries')
-    while not at_non_exist_page(resp):
-        wait()
-        new_link_list, new_name_list = get_gallary_link_and_name(resp, gallary_name_list)
-        gallary_link_list += new_link_list
-        new_gallary_name_list += new_name_list
+    run = True
+    while run:
+        url = f'{FAV_URL}?page={page_idx}'
+        resp = session.get(url, cookies=cookie)
+        lst += gallery_link_in_page(resp)
         page_idx += 1
-        next_page_url = f'{FAV_URL}?page={page_idx}'
-        resp = get_page_with_retry(session, next_page_url, cookie, 3)
-    print(f'Found {len(gallary_link_list)} new gallaries:')
-    for name in new_gallary_name_list:
+        run = not at_non_exist_page(resp)
+    return lst
+
+def downloaded_galleries(gallery_dir):
+    """Get a list of gallery names under GALLERY_DIR.
+I.e., ones that are already downloaded."""
+    name_list = []
+    for fl in os.listdir(gallery_dir):
+        if os.path.isfile(os.path.join(gallery_dir, fl)):
+            filename = os.path.splitext(os.path.basename(fl))[0]
+            name_list.append(unicodedata.normalize('NFC', filename))
+    return name_list
+
+def download_link_in_gallery(session, resp, cookie):
+    """Get download link from gallery page RESP.
+If failed, return None."""
+    # “Click” on the download link.
+    onclick_code = resp.html.xpath(DOWNLOAD_ARCHIVE_ONCLICK_XPATH)[0]
+    popup_url = re.search("'(https://.+)'", onclick_code).groups()[0]
+    resp = session.get(popup_url, cookies=cookie)
+
+    # Now RESP is at the page saying it takes a few minuets to load.
+    # We grab the url to the final page.
+    next_page_url = list(resp.html.links)[0]
+    resp = get_page_with_retry(session, next_page_url, cookie, 5)
+
+    # Finally we have the download path.
+    # name_node_list = resp.html.xpath('//strong')
+    download_link = list(resp.html.absolute_links)[0]
+    return download_link
+
+def info_in_gallery(resp):
+    """Return information about the gallery.
+RESP is the gallery page. Return a dictionary with these keywords:
+misc, taglist, uploader, label, comment."""
+    misc = resp.html.xpath(MISC_XPATH)[0].text
+    taglist = resp.html.xpath(TAGLIST_XPATH)[0].text
+    uploader = resp.html.xpath(UPLOADER_XPATH)[0].text
+    label = resp.html.xpath(LABEL_XPATH)[0].text
+    comment = "\n\n\n\n".join(map(lambda elm: elm.text,
+                            resp.html.xpath(COMMENT_XPATH)))
+    return {'misc': misc, 'taglist': taglist, 'uploader': uploader,
+            'label': label, 'comment': comment}
+
+
+
+### Main program
+
+if __name__ == '__main__':
+    cookie = None
+    with open('cookie.json', 'r') as fle:
+        cookie = json.load(fle)
+    session = HTMLSession()
+
+    # Get downloaded galleries.
+    downloaded_gallery_list = downloaded_galleries(GALLERY_DIR)
+    print(f'Found {len(downloaded_gallery_list)} galleries on drive')
+
+    # Get galleries on exhentai.
+    print('Scanning for galleries on exhentai...')
+    gallery_link_list = all_gallery_links(session, cookie)
+    print(f'Found {len(gallery_link_list)} galleries on exhentai')
+
+    # Filter out new galleries.
+    new_galleries = []
+    for (link, name) in gallery_link_list:
+        if not ((make_filename(name) in downloaded_gallery_list)):
+            new_galleries.append((link, name))
+
+    # List new galleries.
+    print(f'{len(new_galleries)} of them are new galleries:')
+    for (link, name) in new_galleries:
         print(f'  {name}')
 
-        
-    print('Start to download')
-    # goes into each page and get download link
-    total_gallary_count = len(gallary_link_list)
-    current_count = 0
+    # Download galleries.
     failed_list = []
-    # why use name from gallary_name_list rather than from archive
-    # download? those names doesn’t always match! If I use gallary
-    # names to test if I’ve downloaded the gallary and use archive names
-    # to download, those gallaries appear as not-yet-downlaoded
-    # gallaries every time.
-    for gallary_link, gallary_name in zip(gallary_link_list, new_gallary_name_list):
-        wait()
+    idx = 1
+    for (link, name) in new_galleries:
         try:
-            current_count += 1
-            print(f'Downloading gallary {current_count}/{total_gallary_count}')
-            print(f'{gallary_name}')
-            resp = get_page_with_retry(session, gallary_link, cookie, 5)
-            wait()
-            download_link = get_download_link(session, resp, cookie)
-            wait()
-            save_gallary_zip(gallary_name, download_link)
-        except:
-            failed_list.append((gallary_name, gallary_link))
-    # print failed ones
-    if failed_list != []:
-        print(f'Failed to download {len(failed_list)} gallar(ies):')
-        for name, link in failed_list:
+            print(f'Downloading gallery {idx}/{len(new_galleries)}')
+            resp = get_page_with_retry(session, link, cookie, 5)
+            filename = make_filename(name)
+
+            info = info_in_gallery(resp)
+            with open(os.path.join(INFO_DIR, f'{filename}.org'),
+                          'w+') as fl:
+                fl.write(f'| Uploader | {info["uploader"]} |\n')
+                fl.write(f'| Label    | {info["label"]} |\n')
+                fl.write('\n')
+                fl.write(f'* Misc\n\n{info["misc"]}\n\n')
+                fl.write(f'* Taglist\n\n{info["taglist"]}\n\n')
+                fl.write(f'* Comment\n\n{info["comment"]}\n\n')
+
+            download_link = download_link_in_gallery(session,
+                                                     resp, cookie)
+            with open(os.path.join(GALLERY_DIR, f'{filename}.zip'),
+                      'bw') as fl:
+                fl.write(requests.get(download_link).content)
+            idx += 1
+
+        except Exception as err:
+            print('Failed to fetch download link from gallery:')
+            print(err)
+            failed_list.append((link, name))
+
+    if len(failed_list) > 0:
+        print(f'Failed to download {len(failed_list)} galleries:')
+
+        for (link, name) in failed_list:
             print(name)
-            print(f'  {link}')
